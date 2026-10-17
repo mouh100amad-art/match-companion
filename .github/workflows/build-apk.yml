@@ -18,21 +18,18 @@ jobs:
 
       - uses: subosito/flutter-action@v2
         with:
+          flutter-version: '3.24.5'
           channel: 'stable'
           cache: true
 
-      - name: Restore Gradle Wrapper Files
+      - name: Recreate perfect Android folder
         run: |
-          mkdir -p android/gradle/wrapper
-          echo "distributionBase=GRADLE_USER_HOME" > android/gradle/wrapper/gradle-wrapper.properties
-          echo "distributionPath=wrapper/dists" >> android/gradle/wrapper/gradle-wrapper.properties
-          echo "distributionUrl=https\://services.gradle.org/distributions/gradle-8.11.1-bin.zip" >> android/gradle/wrapper/gradle-wrapper.properties
-          echo "zipStoreBase=GRADLE_USER_HOME" >> android/gradle/wrapper/gradle-wrapper.properties
-          echo "zipStorePath=wrapper/dists" >> android/gradle/wrapper/gradle-wrapper.properties
-          curl -sL https://raw.githubusercontent.com/gradle/gradle/v8.11.1/gradlew -o android/gradlew
-          curl -sL https://raw.githubusercontent.com/gradle/gradle/v8.11.1/gradle/wrapper/gradle-wrapper.jar -o android/gradle/wrapper/gradle-wrapper.jar
-          chmod +x android/gradlew
-
+          rm -rf android
+          cd ..
+          flutter create --platforms=android --org com.personal --project-name match_companion tmp_project
+          cp -r tmp_project/android .
+          rm -rf tmp_project
+          
       - name: Get dependencies
         run: flutter pub get
 
