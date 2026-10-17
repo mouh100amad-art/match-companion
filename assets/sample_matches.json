@@ -1,0 +1,68 @@
+[
+  {
+    "idEvent": "sample-1",
+    "strLeague": "دوري أبطال أوروبا",
+    "strHomeTeam": "ريال مدريد",
+    "strAwayTeam": "مانشستر سيتي",
+    "strTimestamp": "2026-10-17T19:00:00+00:00",
+    "strVenue": "سانتياغو برنابيو",
+    "strStatus": "NS",
+    "intHomeScore": null,
+    "intAwayScore": null
+  },
+  {
+    "idEvent": "sample-2",
+    "strLeague": "الدوري الإنجليزي الممتاز",
+    "strHomeTeam": "ليفربول",
+    "strAwayTeam": "أرسنال",
+    "strTimestamp": "2026-10-17T16:30:00+00:00",
+    "strVenue": "أنفيلد",
+    "strStatus": "NS",
+    "intHomeScore": null,
+    "intAwayScore": null
+  },
+  {
+    "idEvent": "sample-3",
+    "strLeague": "الدوري الإسباني",
+    "strHomeTeam": "برشلونة",
+    "strAwayTeam": "أتلتيكو مدريد",
+    "strTimestamp": "2026-10-18T20:00:00+00:00",
+    "strVenue": "كامب نو",
+    "strStatus": "NS",
+    "intHomeScore": null,
+    "intAwayScore": null
+  },
+  {
+    "idEvent": "sample-4",
+    "strLeague": "الدوري الإيطالي",
+    "strHomeTeam": "إنتر ميلان",
+    "strAwayTeam": "يوفنتوس",
+    "strTimestamp": "2026-10-18T18:45:00+00:00",
+    "strVenue": "سان سيرو",
+    "strStatus": "NS",
+    "intHomeScore": null,
+    "intAwayScore": null
+  },
+  {
+    "idEvent": "sample-5",
+    "strLeague": "الدوري الألماني",
+    "strHomeTeam": "بايرن ميونخ",
+    "strAwayTeam": "بوروسيا دورتموند",
+    "strTimestamp": "2026-10-19T17:30:00+00:00",
+    "strVenue": "أليانز أرينا",
+    "strStatus": "NS",
+    "intHomeScore": null,
+    "intAwayScore": null
+  },
+  {
+    "idEvent": "sample-6",
+    "strLeague": "الدوري الفرنسي",
+    "strHomeTeam": "باريس سان جيرمان",
+    "strAwayTeam": "مارسيليا",
+    "strTimestamp": "2026-10-19T19:45:00+00:00",
+    "strVenue": "حديقة الأمراء",
+    "strStatus": "NS",
+    "intHomeScore": null,
+    "intAwayScore": null
+  }
+]
