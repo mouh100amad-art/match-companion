@@ -22,23 +22,25 @@ jobs:
           channel: 'stable'
           cache: true
 
-      - name: Recreate perfect Android folder
+      - name: Create clean Flutter project and move code
         run: |
-          rm -rf android
-          cd ..
-          flutter create --platforms=android --org com.personal --project-name match_companion tmp_project
-          cp -r tmp_project/android .
-          rm -rf tmp_project
+          # إنشاء مشروع جديد نظيف تماماً
+          flutter create --org com.personal --project-name match_companion tmp_app
           
-      - name: Get dependencies
-        run: flutter pub get
-
-      - name: Build release APK
-        run: flutter build apk --release
+          # نسخ كود التطبيق الخاص بنا فقط
+          cp -r lib tmp_app/
+          cp pubspec.yaml tmp_app/
+          cp -r assets tmp_app/ || true
+          
+      - name: Build APK inside new project
+        working-directory: ./tmp_app
+        run: |
+          flutter pub get
+          flutter build apk --release
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: match-companion-apk
-          path: build/app/outputs/flutter-apk/app-release.apk
+          path: tmp_app/build/app/outputs/flutter-apk/app-release.apk
           if-no-files-found: error
