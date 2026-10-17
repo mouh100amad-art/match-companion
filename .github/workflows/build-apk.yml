@@ -18,11 +18,11 @@ jobs:
 
       - uses: subosito/flutter-action@v2
         with:
-          flutter-version: '3.38.1' # الترقية للإصدار المطلوب
+          flutter-version: '3.38.1'
           channel: 'stable'
           cache: true
 
-      - name: Create project, copy code, and force all Gradle settings
+      - name: Create project, copy code, and apply bulletproof settings
         run: |
           # 1. إنشاء المشروع النظيف
           flutter create --org com.personal --project-name match_companion tmp_app
@@ -33,46 +33,62 @@ jobs:
           cp -r assets tmp_app/ || true
           
           cd tmp_app
-
-          # 3. تعديل settings.gradle لرفع AGP إلى 8.11.1
-          sed -i 's/com.android.application" version "[^"]*"/com.android.application" version "8.11.1"/' android/settings.gradle
-
-          # 4. تعديل build.gradle لفرض SDK 36 و Java 17 والإشعارات
+          
+          # 3. استخدام سكربت بايثون للتعامل مع ملفات Gradle أياً كان امتدادها (.gradle أو .gradle.kts)
           python3 -c "
+          import os
           import re
-          p = 'android/app/build.gradle'
-          text = open(p).read()
-          
-          # فرض إصدارات SDK
-          text = re.sub(r'compileSdk\s*=\s*\d+', 'compileSdk = 36', text)
-          text = text.replace('compileSdkVersion 34', 'compileSdkVersion 36')
-          text = re.sub(r'minSdk\s*=\s*flutter\.minSdkVersion', 'minSdk = 23', text)
-          text = re.sub(r'targetSdk\s*=\s*flutter\.targetSdkVersion', 'targetSdk = 36', text)
-          
-          # فرض إعدادات Java 17
-          text = text.replace('sourceCompatibility JavaVersion.VERSION_1_8', 'sourceCompatibility JavaVersion.VERSION_17')
-          text = text.replace('targetCompatibility JavaVersion.VERSION_1_8', 'targetCompatibility JavaVersion.VERSION_17')
-          text = text.replace('jvmTarget = \"1.8\"', 'jvmTarget = \"17\"')
-          text = text.replace(\"jvmTarget = '1.8'\", \"jvmTarget = '17'\")
-          
-          # إضافة الإعدادات المطلوبة لمكتبة الإشعارات
-          if 'coreLibraryDesugaringEnabled' not in text:
-              text = text.replace('compileOptions {', 'compileOptions {\n        coreLibraryDesugaringEnabled true')
-          if 'desugar_jdk_libs' not in text:
-              if 'dependencies {' in text:
-                  text = text.replace('dependencies {', 'dependencies {\n    coreLibraryDesugaring \'com.android.tools:desugar_jdk_libs:2.1.4\'')
-              else:
-                  text += '\ndependencies {\n    coreLibraryDesugaring \'com.android.tools:desugar_jdk_libs:2.1.4\'\n}\n'
-          if 'multiDexEnabled' not in text:
-              text = text.replace('defaultConfig {', 'defaultConfig {\n        multiDexEnabled true')
-                  
-          open(p, 'w').write(text)
-          print('✅ تم تعديل build.gradle بنجاح')
+
+          # تعديل ملف settings
+          for root, dirs, files in os.walk('android'):
+              for f in files:
+                  if f.startswith('settings.gradle'):
+                      path = os.path.join(root, f)
+                      text = open(path).read()
+                      text = re.sub(r'com\.android\.application\"\s*version\s*\"[^\"]+\"', 'com.android.application\" version \"8.11.1\"', text)
+                      text = re.sub(r'com\.android\.application\"\)\s*version\s*\"[^\"]+\"', 'com.android.application\") version \"8.11.1\"', text)
+                      open(path, 'w').write(text)
+
+          # تعديل ملف app/build.gradle
+          for root, dirs, files in os.walk('android/app'):
+              for f in files:
+                  if f.startswith('build.gradle'):
+                      path = os.path.join(root, f)
+                      text = open(path).read()
+                      is_kts = f.endswith('.kts')
+
+                      text = re.sub(r'compileSdk\s*=\s*\d+', 'compileSdk = 36', text)
+                      text = text.replace('compileSdkVersion 34', 'compileSdkVersion 36')
+                      text = re.sub(r'minSdk\s*=\s*flutter\.minSdkVersion', 'minSdk = 23', text)
+                      text = re.sub(r'targetSdk\s*=\s*flutter\.targetSdkVersion', 'targetSdk = 36', text)
+
+                      text = text.replace('sourceCompatibility JavaVersion.VERSION_1_8', 'sourceCompatibility JavaVersion.VERSION_17')
+                      text = text.replace('targetCompatibility JavaVersion.VERSION_1_8', 'targetCompatibility JavaVersion.VERSION_17')
+                      text = text.replace('jvmTarget = \"1.8\"', 'jvmTarget = \"17\"')
+                      text = text.replace(\"jvmTarget = '1.8'\", \"jvmTarget = '17'\")
+
+                      if is_kts:
+                          if 'isCoreLibraryDesugaringEnabled' not in text:
+                              text = text.replace('compileOptions {', 'compileOptions {\n            isCoreLibraryDesugaringEnabled = true')
+                          if 'multiDexEnabled' not in text:
+                              text = text.replace('defaultConfig {', 'defaultConfig {\n            multiDexEnabled = true')
+                      else:
+                          if 'coreLibraryDesugaringEnabled' not in text:
+                              text = text.replace('compileOptions {', 'compileOptions {\n            coreLibraryDesugaringEnabled true')
+                          if 'multiDexEnabled' not in text:
+                              text = text.replace('defaultConfig {', 'defaultConfig {\n            multiDexEnabled true')
+
+                      dep_str = 'coreLibraryDesugaring(\"com.android.tools:desugar_jdk_libs:2.1.4\")' if is_kts else \"coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.1.4'\"
+                      if 'desugar_jdk_libs' not in text:
+                          if 'dependencies {' in text:
+                              text = text.replace('dependencies {', f'dependencies {{\n    {dep_str}')
+                          else:
+                              text += f'\ndependencies {{\n    {dep_str}\n}}\n'
+
+                      open(path, 'w').write(text)
+                      print(f'✅ تم تعديل {path} بنجاح')
           "
 
-          # 5. تأكيد إعدادات Gradle
-          echo "org.gradle.jvmargs=-Xmx4G" >> android/gradle.properties
-          
       - name: Build APK
         working-directory: ./tmp_app
         run: |
