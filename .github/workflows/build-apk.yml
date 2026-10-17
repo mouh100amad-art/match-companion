@@ -22,24 +22,479 @@ jobs:
           channel: 'stable'
           cache: true
 
-      - name: Create project, copy code, and apply bulletproof settings
+      - name: Create project and generate ALL missing Dart files
         run: |
-          # 1. إنشاء المشروع النظيف
           flutter create --org com.personal --project-name match_companion tmp_app
-          
-          # 2. نسخ كود التطبيق
-          cp -r lib tmp_app/
           cp pubspec.yaml tmp_app/
           cp -r assets tmp_app/ || true
-          
           cd tmp_app
           
-          # 3. استخدام سكربت بايثون للتعامل مع ملفات Gradle أياً كان امتدادها (.gradle أو .gradle.kts)
+          python3 -c "
+          import os
+          files = {
+              'lib/main.dart': '''
+          import 'package:flutter/material.dart';
+          import 'package:flutter_localizations/flutter_localizations.dart';
+          import 'package:intl/date_symbol_data_local.dart';
+          import 'package:provider/provider.dart';
+          import 'providers/matches_provider.dart';
+          import 'providers/settings_provider.dart';
+          import 'screens/home_screen.dart';
+          import 'services/notification_service.dart';
+          import 'theme/app_theme.dart';
+
+          Future<void> main() async {
+            WidgetsFlutterBinding.ensureInitialized();
+            await initializeDateFormatting('ar', null);
+            await NotificationService.instance.init();
+            runApp(const MatchCompanionApp());
+          }
+
+          class MatchCompanionApp extends StatelessWidget {
+            const MatchCompanionApp({super.key});
+            @override
+            Widget build(BuildContext context) {
+              return MultiProvider(
+                providers: [
+                  ChangeNotifierProvider(create: (_) => SettingsProvider()..load()),
+                  ChangeNotifierProvider(create: (_) => MatchesProvider()..load()),
+                ],
+                child: Consumer<SettingsProvider>(
+                  builder: (context, settings, _) {
+                    return MaterialApp(
+                      title: 'رفيق المباريات',
+                      debugShowCheckedModeBanner: false,
+                      theme: AppTheme.light,
+                      darkTheme: AppTheme.dark,
+                      themeMode: settings.themeMode,
+                      locale: const Locale('ar'),
+                      supportedLocales: const [Locale('ar')],
+                      localizationsDelegates: const [
+                        GlobalMaterialLocalizations.delegate,
+                        GlobalWidgetsLocalizations.delegate,
+                        GlobalCupertinoLocalizations.delegate,
+                      ],
+                      home: const HomeScreen(),
+                    );
+                  },
+                ),
+              );
+            }
+          }
+          ''',
+              'lib/theme/app_theme.dart': '''
+          import 'package:flutter/material.dart';
+          class AppTheme {
+            static const Color seed = Color(0xFF1B5E20);
+            static ThemeData get light => ThemeData(useMaterial3: true, colorScheme: ColorScheme.fromSeed(seedColor: seed), appBarTheme: const AppBarTheme(centerTitle: true));
+            static ThemeData get dark => ThemeData(useMaterial3: true, colorScheme: ColorScheme.fromSeed(seedColor: seed, brightness: Brightness.dark), appBarTheme: const AppBarTheme(centerTitle: true));
+          }
+          ''',
+              'lib/models/match.dart': '''
+          class MatchEvent {
+            final String id; final String league; final String homeTeam; final String awayTeam;
+            final String? homeBadge; final String? awayBadge; final DateTime utcTime;
+            final String? venue; final String? status; final int? homeScore; final int? awayScore;
+            const MatchEvent({required this.id, required this.league, required this.homeTeam, required this.awayTeam, this.homeBadge, this.awayBadge, required this.utcTime, this.venue, this.status, this.homeScore, this.awayScore});
+            DateTime get localTime => utcTime.toLocal();
+            bool get isLive { final s = (status ?? '').toLowerCase(); return s == 'live' || s == '1h' || s == '2h' || s == 'ht'; }
+            factory MatchEvent.fromSportsDb(Map<String, dynamic> json) {
+              final raw = json['strTimestamp']?.toString() ?? '\${json['dateEvent'] ?? ''}T\${json['strTime'] ?? '00:00:00'}';
+              DateTime utc; try { utc = DateTime.parse(raw).toUtc(); } catch (_) { utc = DateTime.now().toUtc(); }
+              return MatchEvent(id: json['idEvent']?.toString() ?? raw, league: json['strLeague']?.toString() ?? 'غير معروف', homeTeam: json['strHomeTeam']?.toString() ?? '', awayTeam: json['strAwayTeam']?.toString() ?? '', homeBadge: json['strHomeTeamBadge']?.toString(), awayBadge: json['strAwayTeamBadge']?.toString(), utcTime: utc, venue: json['strVenue']?.toString(), status: json['strStatus']?.toString(), homeScore: int.tryParse(json['intHomeScore']?.toString() ?? ''), awayScore: int.tryParse(json['intAwayScore']?.toString() ?? ''));
+            }
+          }
+          ''',
+              'lib/utils/validators.dart': '''
+          class Validators {
+            static const Set<String> _blockedSchemes = {'file', 'content', 'javascript', 'data', 'blob'};
+            static bool isSafeStreamUrl(String raw) {
+              final text = raw.trim(); if (text.isEmpty) return false;
+              final uri = Uri.tryParse(text); if (uri == null) return false;
+              final scheme = uri.scheme.toLowerCase();
+              if (scheme != 'https') return false; if (_blockedSchemes.contains(scheme)) return false;
+              if (uri.host.isEmpty) return false; if (uri.userInfo.isNotEmpty) return false;
+              return true;
+            }
+          }
+          ''',
+              'lib/services/storage_service.dart': '''
+          import 'dart:convert';
+          import 'package:shared_preferences/shared_preferences.dart';
+          class StorageService {
+            static const _favKey = 'favorites_v1'; static const _remindersKey = 'reminders_v1'; static const _apiKeyKey = 'api_key_v1'; static const _themeKey = 'theme_mode_v1';
+            Future<Set<String>> loadFavorites() async { final prefs = await SharedPreferences.getInstance(); return (prefs.getStringList(_favKey) ?? <String>[]).toSet(); }
+            Future<void> saveFavorites(Set<String> value) async { final prefs = await SharedPreferences.getInstance(); await prefs.setStringList(_favKey, value.toList()); }
+            Future<String> loadApiKey() async { final prefs = await SharedPreferences.getInstance(); return prefs.getString(_apiKeyKey) ?? '3'; }
+            Future<void> saveApiKey(String value) async { final prefs = await SharedPreferences.getInstance(); await prefs.setString(_apiKeyKey, value); }
+            Future<Map<String, int>> loadReminders() async { final prefs = await SharedPreferences.getInstance(); final raw = prefs.getString(_remindersKey); if (raw == null) return <String, int>{}; try { final map = jsonDecode(raw) as Map<String, dynamic>; return map.map((k, v) => MapEntry(k, v as int)); } catch (_) { return <String, int>{}; } }
+            Future<void> saveReminders(Map<String, int> value) async { final prefs = await SharedPreferences.getInstance(); await prefs.setString(_remindersKey, jsonEncode(value)); }
+            Future<String?> loadThemeMode() async { final prefs = await SharedPreferences.getInstance(); return prefs.getString(_themeKey); }
+            Future<void> saveThemeMode(String value) async { final prefs = await SharedPreferences.getInstance(); await prefs.setString(_themeKey, value); }
+          }
+          ''',
+              'lib/services/api_service.dart': '''
+          import 'dart:convert';
+          import 'package:flutter/services.dart' show rootBundle;
+          import 'package:http/http.dart' as http;
+          import '../models/match.dart';
+          class ApiService {
+            static const String _base = 'https://www.thesportsdb.com/api/v1/json';
+            static const List<int> _leagueIds = [4328, 4335, 4332, 4331, 4334, 4480];
+            String _key = '3';
+            void setKey(String value) { final trimmed = value.trim(); _key = trimmed.isEmpty ? '3' : trimmed; }
+            Future<List<MatchEvent>> fetchUpcoming() async {
+              final results = await Future.wait(_leagueIds.map(_fetchLeague));
+              final all = results.expand((list) => list).toList();
+              final seen = <String>{}; final unique = all.where((m) => seen.add(m.id)).toList();
+              unique.sort((a, b) => a.utcTime.compareTo(b.utcTime));
+              final cutoff = DateTime.now().toUtc().subtract(const Duration(hours: 3));
+              return unique.where((m) => m.utcTime.isAfter(cutoff)).toList();
+            }
+            Future<List<MatchEvent>> _fetchLeague(int id) async {
+              try { final uri = Uri.parse('\$_base/\$_key/eventsnextleague.php?id=\$id'); final response = await http.get(uri).timeout(const Duration(seconds: 10)); if (response.statusCode != 200) return <MatchEvent>[]; final data = jsonDecode(response.body); if (data is! Map<String, dynamic>) return <MatchEvent>[]; final events = data['events']; if (events is! List) return <MatchEvent>[]; return events.whereType<Map<String, dynamic>>().map(MatchEvent.fromSportsDb).toList(); } catch (_) { return <MatchEvent>[]; }
+            }
+            Future<List<MatchEvent>> loadSample() async {
+              try { final raw = await rootBundle.loadString('assets/sample_matches.json'); final list = jsonDecode(raw); if (list is! List) return <MatchEvent>[]; return list.whereType<Map<String, dynamic>>().map(MatchEvent.fromSportsDb).toList(); } catch (_) { return <MatchEvent>[]; }
+            }
+          }
+          ''',
+              'lib/services/notification_service.dart': '''
+          import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+          import 'package:flutter_timezone/flutter_timezone.dart';
+          import 'package:timezone/data/latest.dart' as tzdata;
+          import 'package:timezone/timezone.dart' as tz;
+          import '../models/match.dart';
+
+          class NotificationService {
+            NotificationService._();
+            static final NotificationService instance = NotificationService._();
+            final FlutterLocalNotificationsPlugin _plugin = FlutterLocalNotificationsPlugin();
+            bool _ready = false;
+
+            Future<void> init() async {
+              if (_ready) return;
+              tzdata.initializeTimeZones();
+              try { final dynamic info = await FlutterTimezone.getLocalTimezone(); final String name = info is String ? info : info.identifier as String; tz.setLocalLocation(tz.getLocation(name)); } catch (_) {}
+              const android = AndroidInitializationSettings('ic_notification');
+              const settings = InitializationSettings(android: android);
+              await _plugin.initialize(settings);
+              _ready = true;
+            }
+
+            Future<bool> requestPermissions() async {
+              final android = _plugin.resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>();
+              if (android == null) return false;
+              final granted = await android.requestNotificationsPermission() ?? false;
+              try { await android.requestExactAlarmsPermission(); } catch (_) {}
+              return granted;
+            }
+
+            int idFor(MatchEvent match) => match.id.hashCode & 0x7fffffff;
+
+            Future<void> scheduleMatchReminder({required MatchEvent match, required int minutesBefore}) async {
+              await init();
+              final when = match.localTime.subtract(Duration(minutes: minutesBefore));
+              if (!when.isAfter(DateTime.now())) return;
+              final tzWhen = tz.TZDateTime.from(when, tz.local);
+              const details = NotificationDetails(android: AndroidNotificationDetails('match_reminders', 'تذكير المباريات', channelDescription: 'إشعارات قبل انطلاق المباريات', importance: Importance.max, priority: Priority.high, icon: 'ic_notification'));
+              await _plugin.zonedSchedule(
+                idFor(match),
+                '⏰ مباراة قريبة',
+                '\${match.homeTeam} × \${match.awayTeam} تنطلق بعد \$minutesBefore دقيقة',
+                tzWhen,
+                details,
+                androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
+              );
+            }
+
+            Future<void> cancelReminder(MatchEvent match) async {
+              await _plugin.cancel(idFor(match));
+            }
+          }
+          ''',
+              'lib/services/stream_launcher.dart': '''
+          import 'package:url_launcher/url_launcher.dart';
+          class StreamLauncher {
+            static Future<bool> _launch(String raw) async { final uri = Uri.tryParse(raw); if (uri == null) return false; try { if (await canLaunchUrl(uri)) { return launchUrl(uri, mode: LaunchMode.externalApplication); } } catch (_) {} return false; }
+            static Future<bool> openTod() async { if (await _launch('tod://')) return true; if (await _launch('https://www.tod.tv/')) return true; return _launch('https://play.google.com/store/apps/details?id=com.bein.tod'); }
+            static Future<bool> openBeinConnect() => _launch('https://www.bein.com/connect');
+            static Future<bool> openFifaPlus() => _launch('https://plus.fifa.com/');
+            static Future<bool> openBeinNews() => _launch('https://www.bein.com/en/');
+          }
+          ''',
+              'lib/services/hls_quality_parser.dart': '''
+          import 'package:http/http.dart' as http;
+          class StreamVariant { final String label; final String url; final int? height; final int? bandwidth; const StreamVariant({required this.label, required this.url, this.height, this.bandwidth}); }
+          class HlsQualityParser {
+            static Future<List<StreamVariant>> parse(String masterUrl) async {
+              final uri = Uri.tryParse(masterUrl); if (uri == null || uri.scheme != 'https') return <StreamVariant>[];
+              final response = await http.get(uri).timeout(const Duration(seconds: 12)); if (response.statusCode != 200) return <StreamVariant>[];
+              final lines = response.body.split('\n'); final variants = <StreamVariant>[];
+              for (var i = 0; i < lines.length; i++) {
+                final line = lines[i].trim(); if (!line.startsWith('#EXT-X-STREAM-INF')) continue;
+                final attrs = _parseAttributes(line); String? childUri;
+                for (var j = i + 1; j < lines.length; j++) { final next = lines[j].trim(); if (next.isEmpty || next.startsWith('#')) continue; childUri = next; break; }
+                if (childUri == null) continue; final absolute = uri.resolve(childUri).toString(); final resolution = attrs['RESOLUTION']; final height = int.tryParse(resolution == null ? '' : resolution.split('x').last); final bandwidth = int.tryParse(attrs['BANDWIDTH'] ?? '');
+                variants.add(StreamVariant(label: _labelFor(height), url: absolute, height: height, bandwidth: bandwidth));
+              }
+              variants.sort((a, b) => (b.height ?? 0).compareTo(a.height ?? 0)); return variants;
+            }
+            static Map<String, String> _parseAttributes(String line) { final map = <String, String>{}; final index = line.indexOf(':'); if (index == -1) return map; final body = line.substring(index + 1); final pattern = RegExp(r'([A-Z0-9-]+)=(\"[^\"]*\"|[^,]*)'); for (final match in pattern.allMatches(body)) { map[match.group(1)!] = match.group(2)!.replaceAll('\"', '').trim(); } return map; }
+            static String _labelFor(int? height) { if (height == null) return 'تلقائي'; if (height >= 2000) return '4K'; if (height >= 1000) return 'FHD 1080p'; if (height >= 700) return 'HD 720p'; if (height >= 400) return 'SD 480p'; return 'SD \${height}p'; }
+          }
+          ''',
+              'lib/providers/settings_provider.dart': '''
+          import 'package:flutter/material.dart';
+          import '../services/storage_service.dart';
+          class SettingsProvider extends ChangeNotifier {
+            final StorageService _storage = StorageService();
+            ThemeMode _themeMode = ThemeMode.system; String _apiKey = '3'; int _defaultReminder = 15;
+            ThemeMode get themeMode => _themeMode; String get apiKey => _apiKey; int get defaultReminder => _defaultReminder;
+            Future<void> load() async { _apiKey = await _storage.loadApiKey(); final mode = await _storage.loadThemeMode(); _themeMode = _parseThemeMode(mode); notifyListeners(); }
+            Future<void> setThemeMode(ThemeMode mode) async { _themeMode = mode; await _storage.saveThemeMode(_themeMode.name); notifyListeners(); }
+            Future<void> setApiKey(String value) async { _apiKey = value.trim().isEmpty ? '3' : value.trim(); await _storage.saveApiKey(_apiKey); notifyListeners(); }
+            Future<void> setDefaultReminder(int minutes) async { _defaultReminder = minutes; notifyListeners(); }
+            ThemeMode _parseThemeMode(String? value) { switch (value) { case 'light': return ThemeMode.light; case 'dark': return ThemeMode.dark; default: return ThemeMode.system; } }
+          }
+          ''',
+              'lib/providers/matches_provider.dart': '''
+          import 'package:flutter/foundation.dart';
+          import '../models/match.dart'; import '../services/api_service.dart'; import '../services/storage_service.dart';
+          class MatchesProvider extends ChangeNotifier {
+            final ApiService _api = ApiService(); final StorageService _storage = StorageService();
+            List<MatchEvent> _matches = <MatchEvent>[]; Set<String> _favorites = <String>{}; bool _loading = false; String? _error;
+            List<MatchEvent> get matches => _matches; Set<String> get favorites => _favorites; bool get loading => _loading; String? get error => _error;
+            List<MatchEvent> get favoriteMatches => _matches.where(isFavorite).toList();
+            Future<void> load() async { _favorites = await _storage.loadFavorites(); await refresh(); }
+            Future<void> refresh() async {
+              _loading = true; _error = null; notifyListeners();
+              try { _api.setKey(await _storage.loadApiKey()); final list = await _api.fetchUpcoming(); if (list.isEmpty) { final sample = await _api.loadSample(); _matches = sample; _error = sample.isEmpty ? 'لا توجد مباريات متاحة حالياً' : null; } else { _matches = list; } } catch (_) { _error = 'تعذر جلب المباريات. تحقق من اتصالك.'; if (_matches.isEmpty) { _matches = await _api.loadSample(); } } finally { _loading = false; notifyListeners(); }
+            }
+            String _keyFor(MatchEvent match) => '\${match.homeTeam}|\${match.awayTeam}';
+            bool isFavorite(MatchEvent match) => _favorites.contains(_keyFor(match));
+            Future<void> toggleFavorite(MatchEvent match) async { final key = _keyFor(match); if (_favorites.contains(key)) { _favorites.remove(key); } else { _favorites.add(key); } await _storage.saveFavorites(_favorites); notifyListeners(); }
+            Future<void> clearFavorites() async { _favorites.clear(); await _storage.saveFavorites(_favorites); notifyListeners(); }
+          }
+          ''',
+              'lib/screens/home_screen.dart': '''
+          import 'package:flutter/material.dart';
+          import 'favorites_tab.dart'; import 'matches_tab.dart'; import 'settings_tab.dart';
+          class HomeScreen extends StatefulWidget {
+            const HomeScreen({super.key});
+            @override State<HomeScreen> createState() => _HomeScreenState();
+          }
+          class _HomeScreenState extends State<HomeScreen> {
+            int _index = 0;
+            @override Widget build(BuildContext context) {
+              return Scaffold(
+                appBar: AppBar(title: const Text('رفيق المباريات')),
+                body: IndexedStack(index: _index, children: const [MatchesTab(), FavoritesTab(), SettingsTab()]),
+                bottomNavigationBar: NavigationBar(
+                  selectedIndex: _index, onDestinationSelected: (value) => setState(() => _index = value),
+                  destinations: const [NavigationDestination(icon: Icon(Icons.sports_soccer), label: 'المباريات'), NavigationDestination(icon: Icon(Icons.star_outline), label: 'المفضلة'), NavigationDestination(icon: Icon(Icons.settings_outlined), label: 'الإعدادات')],
+                ),
+              );
+            }
+          }
+          ''',
+              'lib/screens/matches_tab.dart': '''
+          import 'package:flutter/material.dart'; import 'package:intl/intl.dart'; import 'package:provider/provider.dart';
+          import '../models/match.dart'; import '../providers/matches_provider.dart'; import '../widgets/match_card.dart';
+          class MatchesTab extends StatelessWidget {
+            const MatchesTab({super.key});
+            @override Widget build(BuildContext context) {
+              final provider = context.watch<MatchesProvider>();
+              if (provider.loading && provider.matches.isEmpty) return const Center(child: CircularProgressIndicator());
+              if (provider.matches.isEmpty) return RefreshIndicator(onRefresh: provider.refresh, child: ListView(children: [const SizedBox(height: 120), Icon(Icons.sports_soccer, size: 64, color: Theme.of(context).colorScheme.outline), const SizedBox(height: 16), Center(child: Text(provider.error ?? 'لا توجد مباريات قادمة حالياً')), const SizedBox(height: 24), Center(child: FilledButton.icon(onPressed: provider.refresh, icon: const Icon(Icons.refresh), label: const Text('إعادة المحاولة')))]));
+              final grouped = _group(provider.matches); final children = <Widget>[];
+              grouped.forEach((date, list) { final parsed = DateTime.parse(date); children.add(Padding(padding: const EdgeInsets.fromLTRB(16, 20, 16, 8), child: Text(DateFormat('EEEE، d MMMM yyyy', 'ar').format(parsed), style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)))); children.addAll(list.map((m) => MatchCard(match: m))); });
+              return RefreshIndicator(onRefresh: provider.refresh, child: ListView(children: children));
+            }
+            Map<String, List<MatchEvent>> _group(List<MatchEvent> list) { final map = <String, List<MatchEvent>>{}; for (final match in list) { final key = DateFormat('yyyy-MM-dd').format(match.localTime); map.putIfAbsent(key, () => <MatchEvent>[]).add(match); } return map; }
+          }
+          ''',
+              'lib/screens/favorites_tab.dart': '''
+          import 'package:flutter/material.dart'; import 'package:provider/provider.dart';
+          import '../providers/matches_provider.dart'; import '../widgets/match_card.dart';
+          class FavoritesTab extends StatelessWidget {
+            const FavoritesTab({super.key});
+            @override Widget build(BuildContext context) {
+              final provider = context.watch<MatchesProvider>(); final favorites = provider.favoriteMatches;
+              if (favorites.isEmpty) return const Center(child: Padding(padding: EdgeInsets.all(24), child: Text('لا توجد مباريات في المفضلة بعد.\\nاضغط على النجمة في أي بطاقة مباراة.', textAlign: TextAlign.center)));
+              return ListView(children: favorites.map((m) => MatchCard(match: m)).toList());
+            }
+          }
+          ''',
+              'lib/screens/settings_tab.dart': '''
+          import 'package:flutter/material.dart'; import 'package:provider/provider.dart';
+          import '../providers/matches_provider.dart'; import '../providers/settings_provider.dart';
+          class SettingsTab extends StatefulWidget {
+            const SettingsTab({super.key});
+            @override State<SettingsTab> createState() => _SettingsTabState();
+          }
+          class _SettingsTabState extends State<SettingsTab> {
+            late final TextEditingController _apiController;
+            @override void initState() { super.initState(); _apiController = TextEditingController(text: context.read<SettingsProvider>().apiKey); }
+            @override void dispose() { _apiController.dispose(); super.dispose(); }
+            @override Widget build(BuildContext context) {
+              final settings = context.watch<SettingsProvider>();
+              return ListView(padding: const EdgeInsets.all(16), children: [
+                const Text('المظهر', style: TextStyle(fontWeight: FontWeight.bold)), const SizedBox(height: 8),
+                SegmentedButton<ThemeMode>(segments: const [ButtonSegment(value: ThemeMode.system, label: Text('النظام')), ButtonSegment(value: ThemeMode.light, label: Text('فاتح')), ButtonSegment(value: ThemeMode.dark, label: Text('داكن'))], selected: {settings.themeMode}, onSelectionChanged: (value) => settings.setThemeMode(value.first)),
+                const SizedBox(height: 24), const Text('التذكير الافتراضي', style: TextStyle(fontWeight: FontWeight.bold)), const SizedBox(height: 8),
+                DropdownButtonFormField<int>(initialValue: settings.defaultReminder, decoration: const InputDecoration(border: OutlineInputBorder()), items: const [5, 10, 15, 30, 60].map((m) => DropdownMenuItem(value: m, child: Text('قبل \$m دقيقة'))).toList(), onChanged: (value) { if (value != null) settings.setDefaultReminder(value); }),
+                const SizedBox(height: 24), const Text('مفتاح TheSportsDB (اختياري)', style: TextStyle(fontWeight: FontWeight.bold)), const SizedBox(height: 8),
+                TextField(controller: _apiController, textDirection: TextDirection.ltr, decoration: const InputDecoration(border: OutlineInputBorder(), hintText: '3')),
+                const SizedBox(height: 8),
+                FilledButton(onPressed: () async { await settings.setApiKey(_apiController.text); if (!context.mounted) return; await context.read<MatchesProvider>().refresh(); if (!context.mounted) return; ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('تم الحفظ وتحديث المباريات'))); }, child: const Text('حفظ وتحديث')),
+                const SizedBox(height: 24), const Text('الحماية والخصوصية', style: TextStyle(fontWeight: FontWeight.bold)), const SizedBox(height: 8),
+                const ListTile(leading: Icon(Icons.lock_outline), title: Text('اتصال HTTPS فقط'), subtitle: Text('تم تعطيل الاتصالات غير المشفرة على مستوى النظام')),
+                const ListTile(leading: Icon(Icons.block), title: Text('منع الملفات الضارة'), subtitle: Text('لا يتم تحميل أو تنفيذ أي كود من روابط خارجية')),
+                const ListTile(leading: Icon(Icons.backup_outlined), title: Text('بدون نسخ احتياطي'), subtitle: Text('تم تعطيل النسخ الاحتياطي التلقائي لبيانات التطبيق')),
+                const SizedBox(height: 24),
+                OutlinedButton.icon(onPressed: () async { await context.read<MatchesProvider>().clearFavorites(); if (!context.mounted) return; ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('تم مسح المفضلة'))); }, icon: const Icon(Icons.delete_outline), label: const Text('مسح المفضلة')),
+                const SizedBox(height: 32), Center(child: Text('رفيق المباريات • الإصدار 1.0.0', style: Theme.of(context).textTheme.bodySmall)), const SizedBox(height: 8),
+                const Text('إخلاء مسؤولية: هذا التطبيق لا يستضيف أو يبث أي محتوى مدفوع. يقتصر دوره على عرض جدول المباريات وتذكيراتها وفتح المنصات الرسمية. أنت مسؤول بالكامل عن أي رابط تستخدمه في المشغل المخصص.', textAlign: TextAlign.center, style: TextStyle(fontSize: 12)),
+              ]);
+            }
+          }
+          ''',
+              'lib/widgets/match_card.dart': '''
+          import 'package:flutter/material.dart'; import 'package:intl/intl.dart'; import 'package:provider/provider.dart';
+          import '../models/match.dart'; import '../providers/matches_provider.dart'; import '../screens/match_details_screen.dart';
+          class MatchCard extends StatelessWidget {
+            final MatchEvent match;
+            const MatchCard({super.key, required this.match});
+            @override Widget build(BuildContext context) {
+              final provider = context.watch<MatchesProvider>(); final favorite = provider.isFavorite(match); final theme = Theme.of(context);
+              return Card(margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6), child: InkWell(borderRadius: BorderRadius.circular(16), onTap: () => _openDetails(context), child: Padding(padding: const EdgeInsets.all(14), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Row(children: [Expanded(child: Text(match.league, style: theme.textTheme.labelMedium?.copyWith(color: theme.colorScheme.primary, fontWeight: FontWeight.bold))), if (match.isLive) Container(padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2), decoration: BoxDecoration(color: Colors.red, borderRadius: BorderRadius.circular(8)), child: const Text('مباشر', style: TextStyle(color: Colors.white, fontSize: 11))), IconButton(tooltip: 'المفضلة', icon: Icon(favorite ? Icons.star : Icons.star_border, color: favorite ? Colors.amber : null), onPressed: () => provider.toggleFavorite(match))]),
+                const SizedBox(height: 6),
+                Row(children: [Expanded(child: Text(match.homeTeam, textAlign: TextAlign.right, style: theme.textTheme.titleMedium)), Padding(padding: const EdgeInsets.symmetric(horizontal: 10), child: Text(DateFormat('HH:mm', 'ar').format(match.localTime), style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold))), Expanded(child: Text(match.awayTeam, textAlign: TextAlign.left, style: theme.textTheme.titleMedium))]),
+                const SizedBox(height: 10),
+                Row(children: [Expanded(child: OutlinedButton.icon(onPressed: () => _openDetails(context), icon: const Icon(Icons.alarm, size: 18), label: const Text('تذكير'))), const SizedBox(width: 8), Expanded(child: FilledButton.icon(onPressed: () => _openDetails(context), icon: const Icon(Icons.play_circle_outline, size: 18), label: const Text('مشاهدة')))]),
+              ]))));
+            }
+            void _openDetails(BuildContext context) { Navigator.of(context).push(MaterialPageRoute(builder: (_) => MatchDetailsScreen(match: match))); }
+          }
+          ''',
+              'lib/screens/match_details_screen.dart': '''
+          import 'dart:async';
+          import 'package:flutter/material.dart'; import 'package:intl/intl.dart'; import 'package:provider/provider.dart';
+          import '../models/match.dart'; import '../providers/settings_provider.dart'; import '../services/notification_service.dart'; import '../services/stream_launcher.dart'; import '../utils/validators.dart'; import 'player_screen.dart';
+          class MatchDetailsScreen extends StatefulWidget {
+            final MatchEvent match;
+            const MatchDetailsScreen({super.key, required this.match});
+            @override State<MatchDetailsScreen> createState() => _MatchDetailsScreenState();
+          }
+          class _MatchDetailsScreenState extends State<MatchDetailsScreen> {
+            Timer? _timer; Duration _remaining = Duration.zero; late int _reminder; bool _scheduled = false;
+            @override void initState() { super.initState(); _reminder = context.read<SettingsProvider>().defaultReminder; _tick(); _timer = Timer.periodic(const Duration(seconds: 1), (_) => _tick()); }
+            void _tick() { final remaining = widget.match.localTime.difference(DateTime.now()); if (mounted) { setState(() => _remaining = remaining.isNegative ? Duration.zero : remaining); } }
+            @override void dispose() { _timer?.cancel(); super.dispose(); }
+            Future<void> _schedule() async {
+              final granted = await NotificationService.instance.requestPermissions();
+              if (!granted) { if (!mounted) return; ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('يرجى السماح بالإشعارات والمنبهات الدقيقة'))); return; }
+              await NotificationService.instance.scheduleMatchReminder(match: widget.match, minutesBefore: _reminder);
+              if (!mounted) return; setState(() => _scheduled = true); ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('تم جدولة التذكير قبل \$_reminder دقيقة')));
+            }
+            Future<void> _openCustomPlayer() async {
+              final controller = TextEditingController();
+              final url = await showDialog<String>(context: context, builder: (ctx) => AlertDialog(title: const Text('رابط HLS أملكه'), content: Column(mainAxisSize: MainAxisSize.min, children: [const Text('أدخل رابط HTTPS ينتهي بـ .m3u8. أنت مسؤول عن قانونية المصدر.', style: TextStyle(fontSize: 12)), const SizedBox(height: 8), TextField(controller: controller, textDirection: TextDirection.ltr, decoration: const InputDecoration(hintText: 'https://.../master.m3u8', border: OutlineInputBorder()))]), actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('إلغاء')), FilledButton(onPressed: () => Navigator.pop(ctx, controller.text.trim()), child: const Text('تشغيل'))]));
+              if (url == null || url.isEmpty) return;
+              if (!Validators.isSafeStreamUrl(url)) { if (!mounted) return; ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('رابط غير آمن. يجب أن يكون HTTPS.'))); return; }
+              if (!mounted) return; Navigator.of(context).push(MaterialPageRoute(builder: (_) => PlayerScreen(url: url, title: '\${widget.match.homeTeam} × \${widget.match.awayTeam}')));
+            }
+            String get _countdown { final h = _remaining.inHours; final m = (_remaining.inMinutes % 60).toString().padLeft(2, '0'); final s = (_remaining.inSeconds % 60).toString().padLeft(2, '0'); return '\$h:\$m:\$s'; }
+            @override Widget build(BuildContext context) {
+              final match = widget.match; final theme = Theme.of(context);
+              return Scaffold(appBar: AppBar(title: const Text('تفاصيل المباراة')), body: ListView(padding: const EdgeInsets.all(16), children: [
+                Card(child: Padding(padding: const EdgeInsets.all(20), child: Column(children: [Text(match.league, style: theme.textTheme.labelLarge?.copyWith(color: theme.colorScheme.primary)), const SizedBox(height: 16), Row(children: [Expanded(child: Text(match.homeTeam, textAlign: TextAlign.center, style: theme.textTheme.titleLarge)), Padding(padding: const EdgeInsets.symmetric(horizontal: 12), child: Text('×', style: theme.textTheme.headlineSmall)), Expanded(child: Text(match.awayTeam, textAlign: TextAlign.center, style: theme.textTheme.titleLarge))]), const SizedBox(height: 16), Text(DateFormat('EEEE، d MMMM yyyy • HH:mm', 'ar').format(match.localTime), style: theme.textTheme.bodyMedium), if (match.venue != null) ...[const SizedBox(height: 4), Text(match.venue!, style: theme.textTheme.bodySmall)], const SizedBox(height: 16), Container(padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8), decoration: BoxDecoration(color: theme.colorScheme.primaryContainer, borderRadius: BorderRadius.circular(12)), child: Text(match.localTime.isAfter(DateTime.now()) ? 'تبدأ بعد \$_countdown' : 'انطلقت المباراة', style: theme.textTheme.titleMedium))]))),
+                const SizedBox(height: 16),
+                Card(child: Padding(padding: const EdgeInsets.all(16), child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [const Text('التذكير', style: TextStyle(fontWeight: FontWeight.bold)), const SizedBox(height: 12), DropdownButtonFormField<int>(initialValue: _reminder, decoration: const InputDecoration(border: OutlineInputBorder(), labelText: 'قبل الانطلاق'), items: const [5, 10, 15, 30, 60].map((m) => DropdownMenuItem(value: m, child: Text('\$m دقيقة'))).toList(), onChanged: (value) { if (value != null) setState(() => _reminder = value); }), const SizedBox(height: 12), FilledButton.icon(onPressed: _scheduled ? null : _schedule, icon: Icon(_scheduled ? Icons.check : Icons.alarm), label: Text(_scheduled ? 'تم جدولة التذكير' : 'تفعيل التذكير'))]))),
+                const SizedBox(height: 16),
+                Card(child: Column(children: [
+                  ListTile(leading: const Icon(Icons.live_tv), title: const Text('TOD (رسمي)'), subtitle: const Text('بث beIN Sports الرسمي حتى 4K'), trailing: const Icon(Icons.open_in_new), onTap: StreamLauncher.openTod), const Divider(height: 1),
+                  ListTile(leading: const Icon(Icons.language), title: const Text('beIN CONNECT (رسمي)'), subtitle: const Text('المشاهدة عبر المتصفح حتى 1080p'), trailing: const Icon(Icons.open_in_new), onTap: StreamLauncher.openBeinConnect), const Divider(height: 1),
+                  ListTile(leading: const Icon(Icons.public), title: const Text('FIFA+ (مجاني قانوني)'), subtitle: const Text('ملخصات وإعادات مجانية'), trailing: const Icon(Icons.open_in_new), onTap: StreamLauncher.openFifaPlus), const Divider(height: 1),
+                  ListTile(leading: const Icon(Icons.newspaper), title: const Text('beIN Sports News'), subtitle: const Text('قناة مفتوحة رسمياً'), trailing: const Icon(Icons.open_in_new), onTap: StreamLauncher.openBeinNews), const Divider(height: 1),
+                  ListTile(leading: const Icon(Icons.play_circle_outline), title: const Text('مشغل مخصص (رابط أملكه)'), subtitle: const Text('يدعم SD / HD / FHD وتبديل الجودة'), trailing: const Icon(Icons.chevron_left), onTap: _openCustomPlayer),
+                ])),
+                const SizedBox(height: 16),
+                Card(color: theme.colorScheme.surfaceContainerHighest, child: const Padding(padding: EdgeInsets.all(16), child: Text('هذا التطبيق لا يوفر بثاً مجانياً لقنوات beIN Sports. الخيارات أعلاه هي منصات رسمية أو مجانية قانونية. المشغل المخصص يعمل فقط على روابط تملك حق استخدامها.', style: TextStyle(fontSize: 12)))),
+              ]));
+            }
+          }
+          ''',
+              'lib/screens/player_screen.dart': '''
+          import 'dart:async';
+          import 'package:flutter/material.dart'; import 'package:flutter/services.dart'; import 'package:video_player/video_player.dart';
+          import '../services/hls_quality_parser.dart';
+          class PlayerScreen extends StatefulWidget {
+            final String url; final String title;
+            const PlayerScreen({super.key, required this.url, required this.title});
+            @override State<PlayerScreen> createState() => _PlayerScreenState();
+          }
+          class _PlayerScreenState extends State<PlayerScreen> {
+            VideoPlayerController? _controller; List<StreamVariant> _variants = <StreamVariant>[]; StreamVariant? _selected; bool _loading = true; bool _showControls = true; String? _error; Timer? _hideTimer;
+            @override void initState() { super.initState(); _boot(); }
+            Future<void> _boot() async {
+              try { final variants = await HlsQualityParser.parse(widget.url); if (!mounted) return; _variants = variants; final initialUrl = variants.isNotEmpty ? variants.first.url : widget.url; if (variants.isNotEmpty) _selected = variants.first; await _initController(initialUrl); } catch (_) { if (!mounted) return; setState(() { _loading = false; _error = 'تعذر تشغيل الرابط. تأكد من أنه رابط HLS صالح وأنك تملك حق استخدامه.'; }); }
+            }
+            Future<void> _initController(String url) async {
+              final controller = VideoPlayerController.networkUrl(Uri.parse(url)); await controller.initialize(); controller.addListener(_onPlayerChanged); await controller.play();
+              if (!mounted) { await controller.dispose(); return; }
+              setState(() { _controller = controller; _loading = false; _error = null; });
+            }
+            void _onPlayerChanged() { if (mounted) setState(() {}); }
+            Future<void> _switchTo(StreamVariant variant) async {
+              final old = _controller; final position = old?.value.isInitialized == true ? old!.value.position : Duration.zero;
+              await old?.pause(); old?.removeListener(_onPlayerChanged); await old?.dispose();
+              if (!mounted) return; setState(() { _loading = true; _selected = variant; });
+              final controller = VideoPlayerController.networkUrl(Uri.parse(variant.url)); await controller.initialize(); await controller.seekTo(position); controller.addListener(_onPlayerChanged); await controller.play();
+              if (!mounted) { await controller.dispose(); return; }
+              setState(() { _controller = controller; _loading = false; });
+            }
+            void _toggleControls() { setState(() => _showControls = !_showControls); _hideTimer?.cancel(); if (_showControls) { _hideTimer = Timer(const Duration(seconds: 4), () { if (mounted) setState(() => _showControls = false); }); } }
+            Future<void> _toggleFullscreen() async {
+              final isLandscape = MediaQuery.of(context).orientation == Orientation.landscape;
+              if (isLandscape) { await SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]); await SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge); } else { await SystemChrome.setPreferredOrientations([DeviceOrientation.landscapeLeft, DeviceOrientation.landscapeRight]); await SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky); }
+            }
+            void _showQualitySheet() { showModalBottomSheet<void>(context: context, builder: (ctx) => SafeArea(child: ListView(shrinkWrap: true, children: [const ListTile(title: Text('الجودة', style: TextStyle(fontWeight: FontWeight.bold)), dense: true), ..._variants.map((v) => ListTile(title: Text(v.label), trailing: _selected == v ? const Icon(Icons.check) : null, onTap: () { Navigator.pop(ctx); _switchTo(v); })), if (_variants.isEmpty) const ListTile(title: Text('لا توجد جودات متعددة لهذا الرابط'))]))); }
+            @override void dispose() { _hideTimer?.cancel(); _controller?.removeListener(_onPlayerChanged); _controller?.dispose(); SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]); SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge); super.dispose(); }
+            @override Widget build(BuildContext context) {
+              final controller = _controller;
+              return Scaffold(backgroundColor: Colors.black, body: SafeArea(child: Stack(children: [
+                Center(child: _loading ? const CircularProgressIndicator(color: Colors.white) : _error != null ? Padding(padding: const EdgeInsets.all(24), child: Text(_error!, style: const TextStyle(color: Colors.white), textAlign: TextAlign.center)) : AspectRatio(aspectRatio: controller!.value.aspectRatio, child: VideoPlayer(controller))),
+                if (!_loading && _error == null) Positioned.fill(child: GestureDetector(behavior: HitTestBehavior.opaque, onTap: _toggleControls, child: AnimatedOpacity(opacity: _showControls ? 1 : 0, duration: const Duration(milliseconds: 200), child: _buildControls(controller!)))),
+              ])));
+            }
+            Widget _buildControls(VideoPlayerController controller) {
+              final duration = controller.value.duration; final position = controller.value.position;
+              final maxMs = duration.inMilliseconds <= 0 ? 1.0 : duration.inMilliseconds.toDouble(); final valueMs = position.inMilliseconds.clamp(0, maxMs.toInt()).toDouble();
+              return Column(children: [
+                Container(color: Colors.black54, child: Row(children: [IconButton(icon: const Icon(Icons.arrow_back, color: Colors.white), onPressed: () => Navigator.of(context).pop()), Expanded(child: Text(widget.title, style: const TextStyle(color: Colors.white), maxLines: 1, overflow: TextOverflow.ellipsis)), TextButton.icon(onPressed: _showQualitySheet, icon: const Icon(Icons.high_quality, color: Colors.white), label: Text(_selected?.label ?? 'تلقائي', style: const TextStyle(color: Colors.white)))])),
+                const Spacer(),
+                Container(color: Colors.black54, padding: const EdgeInsets.symmetric(horizontal: 8), child: Row(children: [IconButton(icon: Icon(controller.value.isPlaying ? Icons.pause : Icons.play_arrow, color: Colors.white), onPressed: () { controller.value.isPlaying ? controller.pause() : controller.play(); }), Expanded(child: Slider(value: valueMs, max: maxMs, onChanged: (v) => controller.seekTo(Duration(milliseconds: v.round())))), IconButton(icon: const Icon(Icons.fullscreen, color: Colors.white), onPressed: _toggleFullscreen)])),
+              ]);
+            }
+          }
+          '''
+          }
+          for path, content in files.items():
+              os.makedirs(os.path.dirname(path), exist_ok=True)
+              with open(path, 'w') as f:
+                  f.write(content.strip() + '\\n')
+          print('✅ تم إنشاء جميع ملفات التطبيق الناقصة بنجاح')
+          "
+
+      - name: Apply Gradle Settings
+        run: |
+          cd tmp_app
           python3 -c "
           import os
           import re
-
-          # تعديل ملف settings
           for root, dirs, files in os.walk('android'):
               for f in files:
                   if f.startswith('settings.gradle'):
@@ -48,45 +503,31 @@ jobs:
                       text = re.sub(r'com\.android\.application\"\s*version\s*\"[^\"]+\"', 'com.android.application\" version \"8.11.1\"', text)
                       text = re.sub(r'com\.android\.application\"\)\s*version\s*\"[^\"]+\"', 'com.android.application\") version \"8.11.1\"', text)
                       open(path, 'w').write(text)
-
-          # تعديل ملف app/build.gradle
           for root, dirs, files in os.walk('android/app'):
               for f in files:
                   if f.startswith('build.gradle'):
                       path = os.path.join(root, f)
                       text = open(path).read()
                       is_kts = f.endswith('.kts')
-
                       text = re.sub(r'compileSdk\s*=\s*\d+', 'compileSdk = 36', text)
                       text = text.replace('compileSdkVersion 34', 'compileSdkVersion 36')
                       text = re.sub(r'minSdk\s*=\s*flutter\.minSdkVersion', 'minSdk = 23', text)
                       text = re.sub(r'targetSdk\s*=\s*flutter\.targetSdkVersion', 'targetSdk = 36', text)
-
                       text = text.replace('sourceCompatibility JavaVersion.VERSION_1_8', 'sourceCompatibility JavaVersion.VERSION_17')
                       text = text.replace('targetCompatibility JavaVersion.VERSION_1_8', 'targetCompatibility JavaVersion.VERSION_17')
                       text = text.replace('jvmTarget = \"1.8\"', 'jvmTarget = \"17\"')
                       text = text.replace(\"jvmTarget = '1.8'\", \"jvmTarget = '17'\")
-
                       if is_kts:
-                          if 'isCoreLibraryDesugaringEnabled' not in text:
-                              text = text.replace('compileOptions {', 'compileOptions {\n            isCoreLibraryDesugaringEnabled = true')
-                          if 'multiDexEnabled' not in text:
-                              text = text.replace('defaultConfig {', 'defaultConfig {\n            multiDexEnabled = true')
+                          if 'isCoreLibraryDesugaringEnabled' not in text: text = text.replace('compileOptions {', 'compileOptions {\n            isCoreLibraryDesugaringEnabled = true')
+                          if 'multiDexEnabled' not in text: text = text.replace('defaultConfig {', 'defaultConfig {\n            multiDexEnabled = true')
                       else:
-                          if 'coreLibraryDesugaringEnabled' not in text:
-                              text = text.replace('compileOptions {', 'compileOptions {\n            coreLibraryDesugaringEnabled true')
-                          if 'multiDexEnabled' not in text:
-                              text = text.replace('defaultConfig {', 'defaultConfig {\n            multiDexEnabled true')
-
+                          if 'coreLibraryDesugaringEnabled' not in text: text = text.replace('compileOptions {', 'compileOptions {\n            coreLibraryDesugaringEnabled true')
+                          if 'multiDexEnabled' not in text: text = text.replace('defaultConfig {', 'defaultConfig {\n            multiDexEnabled true')
                       dep_str = 'coreLibraryDesugaring(\"com.android.tools:desugar_jdk_libs:2.1.4\")' if is_kts else \"coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.1.4'\"
                       if 'desugar_jdk_libs' not in text:
-                          if 'dependencies {' in text:
-                              text = text.replace('dependencies {', f'dependencies {{\n    {dep_str}')
-                          else:
-                              text += f'\ndependencies {{\n    {dep_str}\n}}\n'
-
+                          if 'dependencies {' in text: text = text.replace('dependencies {', f'dependencies {{\n    {dep_str}')
+                          else: text += f'\ndependencies {{\n    {dep_str}\n}}\n'
                       open(path, 'w').write(text)
-                      print(f'✅ تم تعديل {path} بنجاح')
           "
 
       - name: Build APK
