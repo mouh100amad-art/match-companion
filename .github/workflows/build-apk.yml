@@ -18,21 +18,62 @@ jobs:
 
       - uses: subosito/flutter-action@v2
         with:
-          flutter-version: '3.24.5'
+          flutter-version: '3.38.1' # الترقية للإصدار المطلوب
           channel: 'stable'
           cache: true
 
-      - name: Create clean Flutter project and move code
+      - name: Create project, copy code, and force all Gradle settings
         run: |
-          # إنشاء مشروع جديد نظيف تماماً
+          # 1. إنشاء المشروع النظيف
           flutter create --org com.personal --project-name match_companion tmp_app
           
-          # نسخ كود التطبيق الخاص بنا فقط
+          # 2. نسخ كود التطبيق
           cp -r lib tmp_app/
           cp pubspec.yaml tmp_app/
           cp -r assets tmp_app/ || true
           
-      - name: Build APK inside new project
+          cd tmp_app
+
+          # 3. تعديل settings.gradle لرفع AGP إلى 8.11.1
+          sed -i 's/com.android.application" version "[^"]*"/com.android.application" version "8.11.1"/' android/settings.gradle
+
+          # 4. تعديل build.gradle لفرض SDK 36 و Java 17 والإشعارات
+          python3 -c "
+          import re
+          p = 'android/app/build.gradle'
+          text = open(p).read()
+          
+          # فرض إصدارات SDK
+          text = re.sub(r'compileSdk\s*=\s*\d+', 'compileSdk = 36', text)
+          text = text.replace('compileSdkVersion 34', 'compileSdkVersion 36')
+          text = re.sub(r'minSdk\s*=\s*flutter\.minSdkVersion', 'minSdk = 23', text)
+          text = re.sub(r'targetSdk\s*=\s*flutter\.targetSdkVersion', 'targetSdk = 36', text)
+          
+          # فرض إعدادات Java 17
+          text = text.replace('sourceCompatibility JavaVersion.VERSION_1_8', 'sourceCompatibility JavaVersion.VERSION_17')
+          text = text.replace('targetCompatibility JavaVersion.VERSION_1_8', 'targetCompatibility JavaVersion.VERSION_17')
+          text = text.replace('jvmTarget = \"1.8\"', 'jvmTarget = \"17\"')
+          text = text.replace(\"jvmTarget = '1.8'\", \"jvmTarget = '17'\")
+          
+          # إضافة الإعدادات المطلوبة لمكتبة الإشعارات
+          if 'coreLibraryDesugaringEnabled' not in text:
+              text = text.replace('compileOptions {', 'compileOptions {\n        coreLibraryDesugaringEnabled true')
+          if 'desugar_jdk_libs' not in text:
+              if 'dependencies {' in text:
+                  text = text.replace('dependencies {', 'dependencies {\n    coreLibraryDesugaring \'com.android.tools:desugar_jdk_libs:2.1.4\'')
+              else:
+                  text += '\ndependencies {\n    coreLibraryDesugaring \'com.android.tools:desugar_jdk_libs:2.1.4\'\n}\n'
+          if 'multiDexEnabled' not in text:
+              text = text.replace('defaultConfig {', 'defaultConfig {\n        multiDexEnabled true')
+                  
+          open(p, 'w').write(text)
+          print('✅ تم تعديل build.gradle بنجاح')
+          "
+
+          # 5. تأكيد إعدادات Gradle
+          echo "org.gradle.jvmargs=-Xmx4G" >> android/gradle.properties
+          
+      - name: Build APK
         working-directory: ./tmp_app
         run: |
           flutter pub get
