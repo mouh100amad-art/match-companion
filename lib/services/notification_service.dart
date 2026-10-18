@@ -43,6 +43,7 @@ class NotificationService {
       '${match.homeTeam} × ${match.awayTeam} تنطلق بعد $minutesBefore دقيقة',
       tzWhen,
       details,
+            uiLocalNotificationDateInterpretation: UILocalNotificationDateInterpretation.absoluteTime,
       androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
     );
   }
