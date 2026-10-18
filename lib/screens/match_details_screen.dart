@@ -29,12 +29,14 @@ class _MatchDetailsScreenState extends State<MatchDetailsScreen> {
     _tick();
     _timer = Timer.periodic(const Duration(seconds: 1), (_) => _tick());
   }
+
   void _tick() {
     final remaining = widget.match.localTime.difference(DateTime.now());
     if (mounted) {
       setState(() => _remaining = remaining.isNegative ? Duration.zero : remaining);
     }
   }
+
   @override
   void dispose() {
     _timer?.cancel();
@@ -67,14 +69,16 @@ class _MatchDetailsScreenState extends State<MatchDetailsScreen> {
             const SizedBox(height: 8),
             TextField(
               controller: controller,
-              t
-              decoration: const InputDecoration(hintText: 'https://.../master.m3u8', border: OutlineInputBorder()),
-            )
+              decoration: const InputDecoration(
+                hintText: 'https://.../master.m3u8',
+                border: OutlineInputBorder(),
+              ),
+            ),
           ],
         ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('إلغاء')),
-          FilledButton(onPressed: () => Navigator.pop(ctx, controller.text.trim()), child: const Text('تشغيل'))
+          FilledButton(onPressed: () => Navigator.pop(ctx, controller.text.trim()), child: const Text('تشغيل')),
         ],
       ),
     );
@@ -115,21 +119,21 @@ class _MatchDetailsScreenState extends State<MatchDetailsScreen> {
                     children: [
                       Expanded(child: Text(match.homeTeam, textAlign: TextAlign.center, style: theme.textTheme.titleLarge)),
                       Padding(padding: const EdgeInsets.symmetric(horizontal: 12), child: Text('×', style: theme.textTheme.headlineSmall)),
-                      Expanded(child: Text(match.awayTeam, textAlign: TextAlign.center, style: theme.textTheme.titleLarge))
+                      Expanded(child: Text(match.awayTeam, textAlign: TextAlign.center, style: theme.textTheme.titleLarge)),
                     ],
                   ),
                   const SizedBox(height: 16),
                   Text(DateFormat('EEEE، d MMMM yyyy • HH:mm', 'ar').format(match.localTime), style: theme.textTheme.bodyMedium),
                   if (match.venue != null) ...[
                     const SizedBox(height: 4),
-                    Text(match.venue!, style: theme.textTheme.bodySmall)
+                    Text(match.venue!, style: theme.textTheme.bodySmall),
                   ],
                   const SizedBox(height: 16),
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                     decoration: BoxDecoration(color: theme.colorScheme.primaryContainer, borderRadius: BorderRadius.circular(12)),
                     child: Text(match.localTime.isAfter(DateTime.now()) ? 'تبدأ بعد $_countdown' : 'انطلقت المباراة', style: theme.textTheme.titleMedium),
-                  )
+                  ),
                 ],
               ),
             ),
@@ -156,7 +160,7 @@ class _MatchDetailsScreenState extends State<MatchDetailsScreen> {
                     onPressed: _scheduled ? null : _schedule,
                     icon: Icon(_scheduled ? Icons.check : Icons.alarm),
                     label: Text(_scheduled ? 'تم جدولة التذكير' : 'تفعيل التذكير'),
-                  )
+                  ),
                 ],
               ),
             ),
@@ -173,7 +177,7 @@ class _MatchDetailsScreenState extends State<MatchDetailsScreen> {
                 const Divider(height: 1),
                 ListTile(leading: const Icon(Icons.newspaper), title: const Text('beIN Sports News'), subtitle: const Text('قناة مفتوحة رسمياً'), trailing: const Icon(Icons.open_in_new), onTap: StreamLauncher.openBeinNews),
                 const Divider(height: 1),
-                ListTile(leading: const Icon(Icons.play_circle_outline), title: const Text('مشغل مخصص (رابط أملكه)'), subtitle: const Text('يدعم SD / HD / FHD وتبديل الجودة'), trailing: const Icon(Icons.chevron_left), onTap: _openCustomPlayer)
+                ListTile(leading: const Icon(Icons.play_circle_outline), title: const Text('مشغل مخصص (رابط أملكه)'), subtitle: const Text('يدعم SD / HD / FHD وتبديل الجودة'), trailing: const Icon(Icons.chevron_left), onTap: _openCustomPlayer),
               ],
             ),
           ),
