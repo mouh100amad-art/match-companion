@@ -16,7 +16,7 @@ class NotificationService {
     try { final dynamic info = await FlutterTimezone.getLocalTimezone(); final String name = info is String ? info : info.identifier as String; tz.setLocalLocation(tz.getLocation(name)); } catch (_) {}
     const android = AndroidInitializationSettings('ic_notification');
     const settings = InitializationSettings(android: android);
-    await _plugin.initialize(settings); // تم التصحيح هنا (بدون settings:)
+    await _plugin.initialize(settings);
     _ready = true;
   }
 
@@ -38,17 +38,17 @@ class NotificationService {
     const details = NotificationDetails(android: AndroidNotificationDetails('match_reminders', 'تذكير المباريات', channelDescription: 'إشعارات قبل انطلاق المباريات', importance: Importance.max, priority: Priority.high, icon: 'ic_notification'));
     
     await _plugin.zonedSchedule(
-      idFor(match), // تم التصحيح هنا (بدون id:)
+      idFor(match),
       '⏰ مباراة قريبة',
       '${match.homeTeam} × ${match.awayTeam} تنطلق بعد $minutesBefore دقيقة',
       tzWhen,
       details,
-            uiLocalNotificationDateInterpretation: UILocalNotificationDateInterpretation.absoluteTime,
+      uiLocalNotificationDateInterpretation: UILocalNotificationDateInterpretation.absoluteTime,
       androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
     );
   }
 
   Future<void> cancelReminder(MatchEvent match) async {
-    await _plugin.cancel(idFor(match)); // تم التصحيح هنا (بدون id:)
+    await _plugin.cancel(idFor(match));
   }
 }
