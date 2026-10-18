@@ -67,7 +67,7 @@ class _MatchDetailsScreenState extends State<MatchDetailsScreen> {
             const SizedBox(height: 8),
             TextField(
               controller: controller,
-              textDirection: TextDirection.ltr,
+              t
               decoration: const InputDecoration(hintText: 'https://.../master.m3u8', border: OutlineInputBorder()),
             )
           ],
