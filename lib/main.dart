@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'package:provider/provider.dart';
-
 import 'providers/matches_provider.dart';
 import 'providers/settings_provider.dart';
 import 'screens/home_screen.dart';
@@ -18,7 +17,6 @@ Future<void> main() async {
 
 class MatchCompanionApp extends StatelessWidget {
   const MatchCompanionApp({super.key});
-
   @override
   Widget build(BuildContext context) {
     return MultiProvider(
