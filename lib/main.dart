@@ -10,9 +10,19 @@ import 'theme/app_theme.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  
+  // تهيئة التاريخ (آمنة)
   await initializeDateFormatting('ar', null);
-  await NotificationService.instance.init();
+
+  // تشغيل التطبيق أولاً لضمان عدم التعليق
   runApp(const MatchCompanionApp());
+
+  // تهيئة الإشعارات في الخلفية دون تعطيل فتح التطبيق
+  try {
+    await NotificationService.instance.init();
+  } catch (e) {
+    debugPrint('Notification init error: $e');
+  }
 }
 
 class MatchCompanionApp extends StatelessWidget {
